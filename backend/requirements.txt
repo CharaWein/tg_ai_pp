@@ -1,0 +1,18 @@
+# Основные зависимости
+fastapi==0.104.1
+uvicorn==0.24.0
+python-telegram-bot==20.7
+python-dotenv==1.0.0
+telethon==1.28.5
+python-multipart==0.0.6
+aiofiles==23.2.1
+requests==2.31.0
+
+# AI зависимости (без проблемных пакетов)
+transformers==4.35.0
+accelerate==0.24.0
+datasets==2.14.6
+peft==0.4.0
+torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+
+numpy>=1.21.0
