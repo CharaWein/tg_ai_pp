@@ -10,7 +10,6 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-import re
 
 # Настройка логирования
 logging.basicConfig(
@@ -103,56 +102,17 @@ class CloneManager:
         """Получение всех активных клонов"""
         return {k: v for k, v in self.links.items() if v.get('active', True)}
 
+# Класс для генерации ответов
 class CloneGenerator:
     def __init__(self, user_id: str):
         self.user_id = user_id
         self.model = None
         self.tokenizer = None
         self.model_loaded = False
-        self.diagnostic_mode = False  # Отключаем диагностику для продакшена
         self.load_model()
     
-    def is_gibberish(self, text: str) -> bool:
-        """Проверяет, является ли текст бессмыслицей"""
-        if not text or len(text.strip()) == 0:
-            return True
-            
-        text_lower = text.lower()
-        
-        # Проверяем наличие осмысленных слов на русском
-        russian_words = [
-            'привет', 'здравствуй', 'как', 'дела', 'что', 'кто', 'где', 'когда',
-            'почему', 'хорошо', 'плохо', 'да', 'нет', 'спасибо', 'пожалуйста',
-            'хочу', 'могу', 'буду', 'есть', 'быть', 'сказать', 'думать', 'знать'
-        ]
-        
-        meaningful_words = sum(1 for word in russian_words if word in text_lower)
-        
-        # Проверяем соотношение букв и цифр/спецсимволов
-        letters = sum(c.isalpha() for c in text)
-        digits = sum(c.isdigit() for c in text)
-        spaces = sum(c.isspace() for c in text)
-        other = len(text) - letters - digits - spaces
-        
-        # Если слишком много цифр или спецсимволов
-        if digits > letters * 0.3 or other > letters * 0.2:
-            return True
-            
-        # Если слишком короткий ответ без смысла
-        if len(text) < 3:
-            return True
-            
-        # Если нет осмысленных русских слов в достаточно длинном тексте
-        if len(text) > 10 and meaningful_words == 0:
-            # Проверяем наличие русских букв
-            has_cyrillic = any('\u0400' <= c <= '\u04FF' for c in text)
-            if not has_cyrillic:
-                return True
-                
-        return False
-    
     def load_model(self):
-        """Загрузка модели с диагностикой"""
+        """Загрузка модели для пользователя"""
         try:
             model_path = f"trained_models/user_{self.user_id}"
             
@@ -162,10 +122,6 @@ class CloneGenerator:
             
             logger.info(f"🔄 Загружаем модель для user_id {self.user_id}")
             
-            # Проверяем содержимое папки модели
-            model_files = os.listdir(model_path)
-            logger.info(f"📁 Файлы в модели: {model_files}")
-            
             # Загружаем токенизатор и модель
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
             self.model = AutoModelForCausalLM.from_pretrained(model_path)
@@ -173,10 +129,6 @@ class CloneGenerator:
             # Настраиваем паддинг
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
-            
-            # Проверяем размеры модели
-            total_params = sum(p.numel() for p in self.model.parameters())
-            logger.info(f"📊 Размер модели: {total_params:,} параметров")
             
             self.model_loaded = True
             logger.info(f"✅ Модель для user_id {self.user_id} успешно загружена")
@@ -186,60 +138,44 @@ class CloneGenerator:
             logger.error(f"❌ Ошибка загрузки модели: {e}")
             return False
     
-    def create_enhanced_prompt(self, message: str) -> str:
-        """Создает улучшенный промпт для генерации"""
-        # Более естественный формат диалога
-        prompt = f"### Диалог:\nПользователь: {message}\nAI:"
-        return prompt
-    
-    def generate_complete_response(self, message: str) -> str:
-        """Генерация полного ответа с улучшенными параметрами"""
+    def generate_response(self, message: str) -> str:
+        """Генерация ответа от клона"""
         if not self.model_loaded:
             return "Модель не загружена. Попробуйте позже."
         
         try:
-            prompt = self.create_enhanced_prompt(message)
+            # Создаем промпт
+            prompt = self.create_prompt(message)
             
-            # Токенизация с attention_mask
+            # Токенизируем с attention_mask
             inputs = self.tokenizer(
                 prompt, 
                 return_tensors="pt",
                 truncation=True,
-                max_length=256,
-                padding=True
+                max_length=512
             )
             
-            # Улучшенные параметры генерации для более полных ответов
+            # Генерация с безопасными параметрами
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs.input_ids,
                     attention_mask=inputs.attention_mask,
-                    max_length=min(inputs.input_ids.shape[1] + 100, 512),  # Увеличиваем максимальную длину
-                    min_length=inputs.input_ids.shape[1] + 10,  # Минимальная длина ответа
+                    max_length=inputs.input_ids.shape[1] + 50,  # Короткие ответы
                     num_return_sequences=1,
-                    temperature=0.7,  # Более творческие ответы
+                    temperature=0.9,  # Более консервативный параметр
                     do_sample=True,
                     pad_token_id=self.tokenizer.eos_token_id,
-                    repetition_penalty=1.1,  # Уменьшаем повторения
-                    top_p=0.9,
-                    top_k=50,
-                    early_stopping=True,
-                    no_repeat_ngram_size=2  # Избегаем повторяющихся n-грамм
+                    repetition_penalty=1.0,  # Убираем penalty для стабильности
+                    top_p=0.95,
+                    top_k=40,
+                    early_stopping=True
                 )
             
             # Декодируем ответ
             generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             
             # Извлекаем только ответ
-            response = generated_text.replace(prompt, "").strip()
-            
-            # Очищаем и улучшаем ответ
-            response = self.clean_and_complete_response(response)
-            
-            # Проверяем качество
-            if self.is_gibberish(response) or len(response) < 5:
-                logger.warning("🎯 Ответ слишком короткий или бессмысленный, используем fallback")
-                return self.get_fallback_response(message)
+            response = self.extract_response(generated_text, prompt)
             
             return response
             
@@ -247,14 +183,28 @@ class CloneGenerator:
             logger.error(f"❌ Ошибка генерации: {e}")
             return self.get_fallback_response(message)
     
-    def clean_and_complete_response(self, text: str) -> str:
-        """Очистка и завершение ответа"""
-        if not text:
-            return text
-            
+    def create_prompt(self, message: str) -> str:
+        """Создание промпта для генерации"""
+        # Более естественный промпт
+        return f"Разговор:\nЧеловек: {message}\nAI:"
+    
+    def extract_response(self, full_text: str, prompt: str) -> str:
+        """Извлечение ответа из сгенерированного текста"""
+        # Убираем промпт
+        response = full_text.replace(prompt, "").strip()
+        
+        # Очищаем ответ
+        response = self.clean_response(response)
+        
+        return response if response else "Интересно! Расскажи подробнее."
+    
+    def clean_response(self, text: str) -> str:
+        """Очистка сгенерированного текста"""
+        import re
+        
         # Удаляем лишние префиксы
         patterns = [
-            r'^(Ассистент|AI|Бот|Клон|Assistant):\s*',
+            r'^(AI|Ассистент|Бот|Клон|Assistant):\s*',
             r'^(Пользователь|User|Человек):\s*',
         ]
         
@@ -262,72 +212,44 @@ class CloneGenerator:
         for pattern in patterns:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
         
-        # Завершаем предложение если оно обрезано
-        if cleaned and not cleaned[-1] in ['.', '!', '?', '…']:
-            # Ищем последнее законченное предложение
-            last_sentence_end = max(
-                cleaned.rfind('.'),
-                cleaned.rfind('!'),
-                cleaned.rfind('?'),
-                cleaned.rfind('…')
-            )
-            
-            if last_sentence_end > 0:
-                cleaned = cleaned[:last_sentence_end + 1]
-            else:
-                # Если нет знаков препинания, добавляем точку
-                cleaned = cleaned.strip() + '.'
+        # Обрезаем до первого конца предложения
+        sentence_end = re.search(r'[.!?…]', cleaned)
+        if sentence_end:
+            cleaned = cleaned[:sentence_end.end()].strip()
         
         # Удаляем лишние пробелы
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         
         return cleaned
     
-    def generate_response(self, message: str) -> str:
-        """Основной метод генерации ответа"""
-        return self.generate_complete_response(message)
-    
     def get_fallback_response(self, message: str) -> str:
-        """Качественные запасные ответы на русском"""
+        """Умные запасные ответы"""
         message_lower = message.lower()
         
         # Контекстные ответы
-        responses = {
-            'привет': ["Привет! Рад тебя видеть! 😊", "Здравствуй! Как твои дела?", "Приветствую! О чём хочешь поговорить?"],
-            'как дела': ["Всё отлично, спасибо! А как у тебя дела?", "Хорошо! Сегодня замечательный день для общения!", "Отлично! Рад, что ты спросил!"],
-            'что делаешь': ["С тобой разговариваю! Это очень интересно 😄", "Общаюсь с тобой и узнаю много нового!", "Отвечаю на твои сообщения и радуюсь нашему диалогу!"],
-            'как тебя зовут': ["Я твой AI-клон! Можешь называть меня как захочешь!", "Я цифровая версия тебя, созданная на основе твоих сообщений!", "Я твоя копия в мире искусственного интеллекта!"],
-            'пока': ["До свидания! Буду ждать нашей следующей встречи! 😊", "Пока! Надеюсь скоро снова пообщаемся!", "Увидимся! Не пропадай надолго!"],
-            'спасибо': ["Всегда пожалуйста! Рад был помочь! 😊", "Не стоит благодарности! Обращайся в любое время!", "Пожалуйста! Приятно было пообщаться!"],
-            'кто ты': ["Я твой AI-клон, созданный на основе твоих сообщений и стиля общения!", "Я цифровая версия тебя, которая училась на твоих текстах!", "Я искусственный интеллект, который пытается говорить как ты!"],
-        }
-        
-        # Ищем подходящий ответ
-        for key, answers in responses.items():
-            if key in message_lower:
-                import random
-                return random.choice(answers)
-        
-        # Общие ответы
-        general_responses = [
-            "Интересный вопрос! Что думаешь об этом сам?",
-            "Понял тебя! Расскажи подробнее, мне действительно интересно.",
-            "Давай обсудим эту тему! Что тебя особенно интересует?",
-            "Хорошая тема для разговора! У тебя есть мысли по этому поводу?",
-            "Расскажи больше, мне правда любопытно твоё мнение!",
-            "Что думаешь об этом? Мне важно твоё мнение.",
-            "Да, я понимаю о чем ты. Продолжай, пожалуйста!",
-            "Интересный поворот! А как бы ты поступил на моём месте?",
-        ]
-        
-        import random
-        return random.choice(general_responses)
+        if any(word in message_lower for word in ['привет', 'здравствуй', 'хай']):
+            return "Привет! Рад общению!"
+        elif any(word in message_lower for word in ['как дела', 'как ты']):
+            return "Всё отлично! А у тебя как?"
+        elif any(word in message_lower for word in ['имя', 'зовут']):
+            return "Я твой AI-клон! Можешь называть меня как хочешь)"
+        elif any(word in message_lower for word in ['игра', 'играть', 'игры']):
+            return "Люблю разные игры! А ты во что любишь играть?"
+        else:
+            fallbacks = [
+                "Интересный вопрос! Что думаешь об этом?",
+                "Давай поговорим об этом подробнее!",
+                "Расскажи больше, мне интересно!",
+                "Хорошая тема для разговора!",
+            ]
+            import random
+            return random.choice(fallbacks)
 
 # Инициализация FastAPI
 app = FastAPI(
     title="AI Clone Server",
     description="Сервер для общения с AI-клонами",
-    version="2.2.0"
+    version="2.0.0"
 )
 
 # CORS middleware
@@ -366,7 +288,7 @@ async def root():
     return {
         "message": "AI Clone Server is running!",
         "status": "active",
-        "version": "2.2.0"
+        "version": "2.0.0"
     }
 
 @app.get("/status")
@@ -490,7 +412,7 @@ async def delete_clone(token: str):
 if __name__ == "__main__":
     import uvicorn
     
-    logger.info("🚀 Запускаем AI Clone Server v2.2...")
+    logger.info("🚀 Запускаем AI Clone Server v2.0...")
     logger.info("📊 Статистика при запуске:")
     
     active_clones = clone_manager.get_all_clones()
