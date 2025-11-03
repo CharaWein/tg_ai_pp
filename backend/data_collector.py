@@ -40,7 +40,7 @@ class TelegramDataCollector:
         except:
             return "unknown"
     
-    async def collect_user_messages(self, limit_per_chat=100):
+    async def collect_user_messages(self, limit_per_chat=500):
         """Сбор сообщений из ВСЕХ типов диалогов"""
         print(f"📥 Собираем сообщения пользователя {self.user_id}...")
         

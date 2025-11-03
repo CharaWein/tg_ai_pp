@@ -16,3 +16,10 @@ peft==0.4.0
 torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 
 numpy>=1.21.0
+
+pymorphy3
+nltk
+spacy
+protobuf
+scikit-learn 
+sentence-transformers

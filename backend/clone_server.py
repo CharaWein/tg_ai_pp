@@ -1,14 +1,34 @@
+# clone_server.py
 import os
 import json
 import logging
+import sys
+import re
+import uuid
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
-import uuid
 from datetime import datetime
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from typing import List, Dict, Any
+try:
+    from hybrid_knowledge_extractor import create_hybrid_knowledge_base
+except ImportError:
+    # Если все еще есть проблемы, создаем простую заглушку
+    def create_hybrid_knowledge_base(user_id: str):
+        return {
+            "personal_info": {},
+            "interests": [],
+            "all_messages": [],
+            "extraction_date": "2024-01-01",
+            "extraction_method": "fallback"
+        }
+
+sys.path.append(os.path.dirname(__file__))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,6 +48,333 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+
+class KnowledgeExtractor:
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        self.raw_data_path = f"user_data/{user_id}/training_data.json"
+        self.knowledge_path = f"user_data/{user_id}/knowledge_base.json"
+        
+    def extract_and_save_knowledge(self) -> bool:
+        try:
+            logger.info(f"🔄 Запускаем извлечение знаний для пользователя {self.user_id}")
+            
+            ai_extractor = SmartKnowledgeExtractor(self.user_id)
+            
+            # Вызываем правильный метод
+            success = ai_extractor.extract_and_save_knowledge()
+            
+            if success:
+                logger.info("✅ Знания успешно извлечены")
+                return True
+            else:
+                logger.error("❌ Не удалось извлечь знания")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка извлечения знаний: {e}")
+            return False
+
+
+class KnowledgeBase:
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        self.knowledge_path = f"user_data/{user_id}/knowledge_base.json"
+        self.knowledge = self.load_knowledge()
+        
+    def load_knowledge(self) -> Dict[str, Any]:
+        """Загружает структурированные знания из knowledge_base.json"""
+        try:
+            if not os.path.exists(self.knowledge_path):
+                logger.warning(f"❌ Файл знаний не найден: {self.knowledge_path}")
+                return {}
+            
+            with open(self.knowledge_path, 'r', encoding='utf-8') as f:
+                knowledge = json.load(f)
+            
+            logger.info(f"✅ Загружены знания для пользователя {self.user_id}")
+            return knowledge
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка загрузки знаний: {e}")
+            return {}
+    
+    def get_relevant_knowledge(self, user_message: str) -> str:
+        """Возвращает релевантные знания для текущего сообщения"""
+        message_lower = user_message.lower()
+        relevant_facts = []
+        
+        # Проверяем упоминание имени
+        if any(phrase in message_lower for phrase in ['как тебя зовут', 'твое имя', 'представься']):
+            if name := self.knowledge.get("personal_info", {}).get("name"):
+                relevant_facts.append(f"Меня зовут {name}")
+        
+        # Проверяем вопросы о возрасте
+        if any(phrase in message_lower for phrase in ['сколько лет', 'твой возраст', 'возраст']):
+            if age := self.knowledge.get("personal_info", {}).get("age"):
+                relevant_facts.append(f"Мне {age} лет")
+        
+        # Проверяем вопросы о городе
+        if any(phrase in message_lower for phrase in ['откуда', 'город', 'живешь']):
+            if city := self.knowledge.get("personal_info", {}).get("city"):
+                relevant_facts.append(f"Живу в {city}")
+        
+        # Проверяем вопросы о друзьях
+        for friend in self.knowledge.get("friends", {}):
+            if friend.lower() in message_lower:
+                relevant_facts.append(f"Знаю {friend}")
+        
+        # Проверяем интересы
+        for interest in self.knowledge.get("interests", []):
+            if interest in message_lower:
+                relevant_facts.append(f"Интересуюсь {interest}")
+        
+        return " | ".join(relevant_facts) if relevant_facts else ""
+
+    def get_persona_description(self) -> str:
+        """Возвращает описание личности для промпта"""
+        persona_parts = []
+        
+        # Базовая информация
+        personal_info = self.knowledge.get("personal_info", {})
+        
+        if name := personal_info.get("name"):
+            persona_parts.append(f"Меня зовут {name}")
+        
+        if age := personal_info.get("age"):
+            persona_parts.append(f"Мне {age} лет")
+        
+        if city := personal_info.get("city"):
+            persona_parts.append(f"Живу в {city}")
+        
+        if work := personal_info.get("work"):
+            persona_parts.append(f"Работаю: {work}")
+        
+        # Интересы
+        if interests := self.knowledge.get("interests", [])[:5]:
+            persona_parts.append(f"Интересы: {', '.join(interests)}")
+        
+        # Друзья
+        if friends := list(self.knowledge.get("friends", {}).keys())[:3]:
+            persona_parts.append(f"Друзья: {', '.join(friends)}")
+        
+        # Привычки
+        if habits := self.knowledge.get("habits", [])[:3]:
+            persona_parts.append(f"Привычки: {', '.join(habits)}")
+        
+        return ". ".join(persona_parts) if persona_parts else "Я - AI-клон, обученный на ваших сообщениях"
+
+class AdvancedRussianGenerator:
+    def __init__(self, model, tokenizer, user_id: str):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.user_id = user_id
+        self.conversation_history = []
+        self.knowledge_base = KnowledgeBase(user_id)
+        
+    def generate_response(self, user_id: str, message: str) -> str:
+        """Генерация ответов с учетом качественных знаний"""
+        try:
+            if user_id not in self.models:
+                if not self.load_user_model(user_id):
+                    return "Привет! Рад общению!"
+            
+            from advanced_generator import AdvancedRussianGenerator
+            
+            generator = AdvancedRussianGenerator(self.models[user_id], self.tokenizers[user_id], user_id)
+            
+            # ВАЖНО: передаем только message, context не обязателен
+            response = generator.generate_response(message)
+            
+            return response
+                
+        except Exception as e:
+            logger.error(f"Ошибка генерации для {user_id}: {e}")
+            import traceback
+            logger.error(f"Подробности ошибки: {traceback.format_exc()}")
+            return "Давайте поговорим о чем-нибудь интересном!"
+    
+    def build_knowledge_aware_prompt(self, user_message: str, relevant_knowledge: str) -> str:
+        """Строит промпт с учетом знаний о личности"""
+        
+        # Базовая информация о личности
+        persona = self.knowledge_base.get_persona_description()
+        
+        if not self.conversation_history:
+            if relevant_knowledge:
+                return f"""Информация обо мне: {persona}
+Релевантные факты: {relevant_knowledge}
+Человек: {user_message}
+Я:"""
+            else:
+                return f"""Информация обо мне: {persona}
+Человек: {user_message}
+Я:"""
+        
+        # С историей диалога
+        context_lines = []
+        for i, msg in enumerate(self.conversation_history[-2:]):
+            corrected_msg = self.correct_third_person(msg)
+            prefix = "Человек: " if i % 2 == 0 else "Я: "
+            context_lines.append(f"{prefix}{corrected_msg}")
+        
+        context_str = "\n".join(context_lines)
+        
+        if relevant_knowledge:
+            return f"""Информация обо мне: {persona}
+Релевантные факты: {relevant_knowledge}
+{context_str}
+Человек: {user_message}
+Я:"""
+        else:
+            return f"""Информация обо мне: {persona}
+{context_str}
+Человек: {user_message}
+Я:"""
+    
+    def extract_and_enhance_response(self, full_text: str, original_prompt: str, user_message: str) -> str:
+        """Извлекает ответ и улучшает его с учетом знаний"""
+        
+        response = full_text.replace(original_prompt, "").strip()
+        response = self.advanced_cleaning(response)
+        response = self.correct_third_person(response)
+        response = self.remove_narrative_phrases(response)
+        response = self.trim_to_last_complete_sentence(response)
+        
+        # Улучшаем ответ на основе знаний
+        response = self.enhance_with_knowledge(response, user_message)
+        
+        return response
+    
+    def enhance_with_knowledge(self, response: str, user_message: str) -> str:
+        """Улучшает ответ, добавляя персонализированные детали"""
+        
+        message_lower = user_message.lower()
+        response_lower = response.lower()
+        
+        # Если спрашивают о имени, но в ответе его нет - добавляем
+        if any(phrase in message_lower for phrase in ['как тебя зовут', 'твое имя']):
+            if name := self.knowledge_base.knowledge.get("personal_info", {}).get("name"):
+                if name.lower() not in response_lower:
+                    if len(response) < 50:
+                        response = f"Меня зовут {name}. {response}"
+        
+        # Если спрашивают о друзьях
+        for friend in self.knowledge_base.knowledge.get("friends", {}):
+            if friend.lower() in message_lower and friend.lower() not in response_lower:
+                response = response.replace("он", friend).replace("она", friend)
+        
+        return response
+    
+    def get_knowledgeable_fallback(self, user_message: str) -> str:
+        """Умные fallback-ответы с использованием знаний"""
+        
+        message_lower = user_message.lower()
+        
+        # Используем знания для персонализированных ответов
+        if 'как тебя зовут' in message_lower:
+            if name := self.knowledge_base.knowledge.get("personal_info", {}).get("name"):
+                return f"Меня зовут {name}! А тебя?"
+            else:
+                return "Я еще не представился! Можешь назвать меня как хочешь)"
+        
+        if 'твои интересы' in message_lower or 'чем увлекаешься' in message_lower:
+            if interests := list(self.knowledge_base.knowledge.get("interests", []))[:3]:
+                return f"Я увлекаюсь {', '.join(interests)}. А что нравится тебе?"
+        
+        if 'твои друзья' in message_lower or 'с кем общаешься' in message_lower:
+            if friends := list(self.knowledge_base.knowledge.get("friends", {}).keys())[:2]:
+                return f"Общаюсь с {', '.join(friends)}. Хорошие ребята!"
+        
+        if 'сколько тебе лет' in message_lower or 'твой возраст' in message_lower:
+            if age := self.knowledge_base.knowledge.get("personal_info", {}).get("age"):
+                return f"Мне {age} лет. А тебе?"
+        
+        # Стандартные fallback-ы
+        fallbacks = [
+            "Интересный вопрос! Давай обсудим это подробнее.",
+            "Хорошо, что спросил. Мое мнение по этому поводу...",
+            "Понимаю, о чем ты. У меня похожие мысли!",
+            "Да, это важная тема. Хочешь узнать мое мнение?",
+            "Спасибо за вопрос! Давай поговорим об этом.",
+        ]
+        
+        import numpy as np
+        return np.random.choice(fallbacks)
+    
+    def calculate_response_length(self, user_message: str) -> int:
+        """Динамически определяет длину ответа"""
+        message_length = len(user_message.split())
+        
+        if message_length <= 3:
+            return 20
+        elif message_length <= 10:
+            return 30
+        else:
+            return 40
+    
+    def correct_third_person(self, text: str) -> str:
+        """Исправляет фразы в третьем лице"""
+        corrections = [
+            (r'сказал я', ''),
+            (r'ответил я', ''),
+            (r'спросил я', ''),
+            (r'добавил я', ''),
+            (r',?\s*сказал\s+я[.!]?', ''),
+        ]
+        corrected = text
+        for pattern, replacement in corrections:
+            corrected = re.sub(pattern, replacement, corrected, flags=re.IGNORECASE)
+        return corrected.strip()
+    
+    def remove_narrative_phrases(self, text: str) -> str:
+        """Удаляет нарративные фразы"""
+        narrative_patterns = [r'^[Яя]\s+(сказал|ответил)', r'потом\s+[Яя]']
+        cleaned = text
+        for pattern in narrative_patterns:
+            cleaned = re.sub(pattern, '', cleaned)
+        return cleaned.strip()
+    
+    def advanced_cleaning(self, text: str) -> str:
+        """Продвинутая очистка ответа"""
+        patterns = [
+            r'Assistant\s*:?\s*', r'User\s*:?\s*', r'Пользователь\s*:?\s*',
+            r'Ассистент\s*:?\s*', r'Человек\s*:?\s*', r'<\|.*?\|>',
+            r'Ты:\s*', r'Я:\s*', r'^[Ии]\s+',
+        ]
+        cleaned = text
+        for pattern in patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        return cleaned
+    
+    def trim_to_last_complete_sentence(self, text: str) -> str:
+        """Обрезает до последнего полного предложения"""
+        sentence_endings = r'[.!?…]'
+        sentences = re.split(f'({sentence_endings})', text)
+        if len(sentences) <= 1: return text
+        complete_sentences = []
+        for i in range(0, len(sentences)-1, 2):
+            if i+1 < len(sentences):
+                sentence = sentences[i] + sentences[i+1]
+                if not self.contains_narrative_phrases(sentence):
+                    complete_sentences.append(sentence)
+        return ''.join(complete_sentences).strip() if complete_sentences else text
+    
+    def contains_narrative_phrases(self, text: str) -> bool:
+        """Проверяет нарративные фразы"""
+        narrative_indicators = [r'сказал я', r'ответил я', r'спросил я']
+        for pattern in narrative_indicators:
+            if re.search(pattern, text, re.IGNORECASE): return True
+        return False
+    
+    def is_gibberish(self, text: str) -> bool:
+        """Проверка на бессмысленный текст"""
+        if len(text) < 3: return True
+        if re.search(r'(.)\1{3,}', text): return True
+        russian_chars = len(re.findall(r'[а-яА-ЯёЁ]', text))
+        total_chars = max(len(re.findall(r'\w', text)), 1)
+        return russian_chars / total_chars < 0.4
 
 class CloneModel:
     def __init__(self):
@@ -55,6 +402,17 @@ class CloneModel:
                 self.tokenizers[user_id].pad_token = self.tokenizers[user_id].eos_token
             
             logger.info(f"✅ Модель для пользователя {user_id} успешно загружена")
+            
+            # ДОБАВЛЯЕМ: Создаем базу знаний при загрузке модели
+            logger.info(f"🔄 Создаем базу знаний для пользователя {user_id}")
+            from hybrid_knowledge_extractor import create_hybrid_knowledge_base
+            knowledge = create_hybrid_knowledge_base(user_id)
+            
+            if knowledge.get("personal_info") or knowledge.get("interests"):
+                logger.info(f"✅ База знаний создана: {len(knowledge.get('personal_info', {}))} фактов, {len(knowledge.get('interests', []))} интересов")
+            else:
+                logger.warning(f"⚠️ База знаний пустая или содержит мало информации")
+            
             return True
             
         except Exception as e:
@@ -62,50 +420,67 @@ class CloneModel:
             return False
     
     def generate_response(self, user_id: str, message: str) -> str:
-        """Генерация ответов"""
+        """Генерация с использованием KnowledgeBase для принудительного применения знаний"""
         try:
             if user_id not in self.models:
                 if not self.load_user_model(user_id):
-                    return "Привет! Рад общению!"
+                    return "Привет! Как дела?"
             
-            tokenizer = self.tokenizers[user_id]
-            model = self.models[user_id]
+            # ВАЖНО: Используем KnowledgeBase для принудительного применения знаний
+            knowledge_base = KnowledgeBase(user_id)
             
-            # Простой промпт
-            prompt = f"Человек: {message}\nAI:"
+            # Сначала проверяем, есть ли прямой ответ в знаниях
+            relevant_knowledge = knowledge_base.get_relevant_knowledge(message)
+            if relevant_knowledge:
+                logger.info(f"🎯 Найдены релевантные знания: {relevant_knowledge}")
+                # Форматируем ответ на основе знаний
+                return self.format_knowledge_answer(relevant_knowledge, message)
             
-            inputs = tokenizer.encode(prompt, return_tensors="pt", max_length=128, truncation=True)
-            
-            with torch.no_grad():
-                outputs = model.generate(
-                    inputs,
-                    max_length=len(inputs[0]) + 50,
-                    num_return_sequences=1,
-                    temperature=0.7,
-                    do_sample=True,
-                    pad_token_id=tokenizer.eos_token_id,
-                    repetition_penalty=1.2,
-                    top_p=0.9,
-                    early_stopping=True
-                )
-            
-            response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
-            if "AI:" in response:
-                response = response.split("AI:")[-1].strip()
-            else:
-                response = response.replace(prompt, "").strip()
-            
-            if not response:
-                response = "Интересно! Расскажи подробнее."
+            # Если нет прямого ответа, используем генератор с учетом знаний
+            from realtime_search_generator import RealtimeSearchGenerator
+            generator = RealtimeSearchGenerator(self.models[user_id], self.tokenizers[user_id], user_id)
+            response = generator.generate_response(message)
             
             return response
                 
         except Exception as e:
-            logger.error(f"Ошибка генерации для {user_id}: {e}")
-            return "Давайте поговорим о чем-нибудь!"
+            logger.error(f"Ошибка генерации: {e}")
+            return "Давай поговорим о чем-нибудь интересном!"
+    
+    def format_knowledge_answer(self, knowledge: str, question: str) -> str:
+        """Форматирует ответ на основе знаний"""
+        question_lower = question.lower()
+        
+        # Если это вопрос об имени
+        if any(phrase in question_lower for phrase in ['как тебя зовут', 'твое имя', 'представься']):
+            if 'Меня зовут' in knowledge:
+                return knowledge
+            else:
+                # Извлекаем имя из знаний
+                name_match = re.search(r'Меня зовут (\w+)', knowledge)
+                if name_match:
+                    return f"Меня зовут {name_match.group(1)}"
+                else:
+                    # Пробуем извлечь любое имя
+                    words = knowledge.split()
+                    for word in words:
+                        if word.istitle() and len(word) > 2 and word not in ['Меня', 'Мне', 'Мой']:
+                            return f"Меня зовут {word}"
+        
+        # Если это вопрос о возрасте
+        if any(phrase in question_lower for phrase in ['сколько лет', 'твой возраст']):
+            if 'Мне' in knowledge and 'лет' in knowledge:
+                return knowledge
+        
+        # Если это вопрос о городе
+        if any(phrase in question_lower for phrase in ['откуда', 'город', 'живешь']):
+            if 'Живу в' in knowledge:
+                return knowledge
+        
+        # Возвращаем знания как есть
+        return knowledge
 
-class SimpleShareService:
+class CloneShareService:
     def __init__(self):
         self.links_file = "clone_links.json"
         self.links = self.load_links()
@@ -215,7 +590,7 @@ class SimpleShareService:
 
 # Инициализация сервисов
 clone_model = CloneModel()
-share_service = SimpleShareService()
+share_service = CloneShareService()
 
 @app.get("/")
 async def root():
@@ -270,12 +645,27 @@ async def chat_with_clone(token: str, request: ChatRequest):
         logger.error(f"Ошибка в чате с клоном {token}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.post("/user/{user_id}/refresh_knowledge")
+async def refresh_knowledge(user_id: str):
+    """Принудительное обновление знаний пользователя"""
+    try:
+        extractor = KnowledgeExtractor(user_id)
+        success = extractor.extract_and_save_knowledge()
+        
+        if success:
+            return {"status": "success", "message": "Knowledge refreshed"}
+        else:
+            return {"status": "error", "message": "Failed to refresh knowledge"}
+            
+    except Exception as e:
+        logger.error(f"Ошибка обновления знаний: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @app.get("/clone/{token}/web", response_class=HTMLResponse)
 async def clone_web_interface(token: str):
     """Веб-интерфейс для чата с клоном"""
     user_id = share_service.get_user_id_by_token(token)
     if not user_id:
-        # ИСПРАВЛЕННАЯ ЧАСТЬ - убрано неправильное форматирование
         html_content = """
         <html>
             <head>

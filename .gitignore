@@ -30,6 +30,12 @@ wheels/
 *.egg
 MANIFEST
 
+# Директории зависимостей
+node_modules/
+.npm
+.yarn/
+.pnpm/
+
 # Virtual environments
 myenv/
 env/
