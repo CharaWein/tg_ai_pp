@@ -1,0 +1,113 @@
+# .gitignore - Исключаем конфиденциальные данные и ненужные файлы
+
+# ========== ОКРУЖЕНИЕ ==========
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ========== PYTHON ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ========== ВИРТУАЛЬНОЕ ОКРУЖЕНИЕ ==========
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ========== IDE ==========
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# ========== DATA - КОНФИДЕНЦИАЛЬНЫЕ ДАННЫЕ ==========
+data/
+!data/.gitkeep
+data/user_messages.json
+data/facts_advanced.json
+data/prompt_template.json
+data/dialogue_history.json
+data/chroma/
+data/chroma_db/
+
+# ========== ЛОГИ ==========
+*.log
+logs/
+bot.log
+debug.log
+
+# ========== КЭШ ==========
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ========== СИСТЕМНЫЕ ФАЙЛЫ ==========
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+*.swp
+
+# ========== TELEGRAM ДАННЫЕ ==========
+*.session
+session.pickle
+tdata/
+
+# ========== OLLAMA ==========
+models/
+ollama_data/
+
+# ========== PRIVATE KEYS / SECRETS ==========
+*.private
+*.secret
+secrets/
+private/
+
+# ========== BACKUP FILES ==========
+*.backup
+*.bkp
+*_old
+*_backup
+
+# ========== OS SPECIFIC ==========
+.LSOverride
+._*
+.AppleDouble
+.AppleDB
+
+# ========== ЧУВСТВИТЕЛЬНЫЕ ФАЙЛЫ ==========
+credentials.json
+api_keys.txt
+passwords.txt
+config.local.py
+settings.local.py
