@@ -1,4 +1,4 @@
-# llm_generator_final_CLEAN.py - ФИНАЛЬНАЯ ВЕРСИЯ БЕЗ ПРИМЕРОВ
+# llm_generator_final_FIXED.py - Исправленный импорт
 
 import requests
 import json
@@ -7,9 +7,19 @@ import logging
 from datetime import datetime
 from chromadb.utils import embedding_functions
 from config import OLLAMA_API_URL, OLLAMA_MODEL, CHROMA_DB_DIR
-from style_analyzer_smart import load_prompt_template
 
 logger = logging.getLogger(__name__)
+
+
+def load_prompt_template():
+    """Загружает prompt_template.json напрямую"""
+    try:
+        with open('data/prompt_template.json', 'r', encoding='utf-8') as f:
+            template = json.load(f)
+            return template
+    except FileNotFoundError:
+        logger.error("❌ data/prompt_template.json не найден!")
+        return None
 
 
 class DialogueHistory:
@@ -72,7 +82,7 @@ class LLMGenerator:
         
         if not self.prompt_template:
             logger.error("❌ Prompt template не загружен!")
-            raise RuntimeError("Запусти style_analyzer_smart.py")
+            raise RuntimeError("Запусти prompt_generator_advanced.py")
         
         # ТОЛЬКО откровенные утечки промта
         self.bad_patterns = [
@@ -166,10 +176,16 @@ class LLMGenerator:
         logger.info(f"📝 URL: {OLLAMA_API_URL}/api/chat")
         logger.info(f"📝 Model: {OLLAMA_MODEL}")
         
+        # Получаем system prompt из загруженного template
+        system_prompt = self.prompt_template.get('system_prompt', '')
+        if not system_prompt:
+            logger.error("❌ system_prompt не найден в template!")
+            return None
+        
         data = {
             "model": OLLAMA_MODEL,
             "messages": [
-                {"role": "system", "content": self.prompt_template['system_prompt']},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question}
             ],
             "stream": False,
