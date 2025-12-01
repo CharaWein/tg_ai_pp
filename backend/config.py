@@ -1,10 +1,15 @@
-# config.py - ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ (скопируй прямо сейчас!)
+# config.py - ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ
 
 import os
 from dotenv import load_dotenv
 from pathlib import Path
 
+# Загрузка .env первым делом!
 load_dotenv()
+
+# ========== БАЗОВЫЕ ПУТИ ==========
+BASE_DIR = Path(__file__).parent
+DATA_DIR = BASE_DIR / "data"
 
 # ========== TELEGRAM ==========
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
@@ -12,21 +17,26 @@ TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_PHONE = os.getenv("TELEGRAM_PHONE", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
-# ========== OLLAMA - ИСПРАВЛЕНО! ==========
-# ⚠️ ВАЖНО: БЕЗ /api/generate в конце!
+# ========== OLLAMA ==========
 OLLAMA_API_URL = "http://localhost:11434"
-OLLAMA_MODEL = "mistral:7b"  # ← ИСПРАВЛЕНО! (было gemma3:4b)
+OLLAMA_MODEL = "mistral:7b"
 
-# ========== DATA PATHS ==========
-DATA_DIR = "data"
-MESSAGES_FILE = os.path.join(DATA_DIR, "user_messages.json")
-FACTS_FILE = os.path.join(DATA_DIR, "facts_advanced.json")
-PROMPT_TEMPLATE_FILE = os.path.join(DATA_DIR, "prompt_template.json")
-DIALOGUE_HISTORY_FILE = os.path.join(DATA_DIR, "dialogue_history.json")
-CHROMA_DB_DIR = os.path.join(DATA_DIR, "chroma_db")
+# ========== ФАЙЛЫ ДАННЫХ ==========
+MESSAGES_FILE = DATA_DIR / "user_messages.json"
+FACTS_FILE = DATA_DIR / "facts_advanced.json"
+PROMPT_TEMPLATE_FILE = DATA_DIR / "prompt_template.json"
+DIALOGUE_HISTORY_FILE = DATA_DIR / "dialogue_history.json"
+CHROMA_DB_DIR = DATA_DIR / "chroma_db"
 
-# ========== DEBUG ==========
+# ========== НАСТРОЙКИ ИНДЕКСАЦИИ ==========
+EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+BATCH_SIZE = 500
+MIN_MESSAGE_LENGTH = 3
+MAX_MESSAGE_LENGTH = 5000
+
+# ========== НАСТРОЙКИ ЛОГИРОВАНИЯ ==========
 DEBUG = True
+LOG_LEVEL = "INFO"
 
 # ========== ВАЛИДАЦИЯ ==========
 if not BOT_TOKEN:
@@ -36,9 +46,10 @@ if not TELEGRAM_API_ID:
     raise ValueError("❌ TELEGRAM_API_ID не установлен в .env")
 
 # ========== СОЗДАНИЕ ДИРЕКТОРИЙ ==========
-Path(DATA_DIR).mkdir(exist_ok=True)
-Path(CHROMA_DB_DIR).mkdir(exist_ok=True)
+DATA_DIR.mkdir(exist_ok=True)
+CHROMA_DB_DIR.mkdir(exist_ok=True)
 
-print("✅ Config загружен")
+print("✅ Config загружен успешно!")
+print(f"   DATA_DIR: {DATA_DIR}")
 print(f"   OLLAMA_API_URL: {OLLAMA_API_URL}")
 print(f"   OLLAMA_MODEL: {OLLAMA_MODEL}")
