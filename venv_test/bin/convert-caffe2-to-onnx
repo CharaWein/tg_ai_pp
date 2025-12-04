@@ -1,0 +1,7 @@
+#!/home/prox1m1ty/chara/tg_ai_pp/venv_test/bin/python3
+import sys
+from caffe2.python.onnx.bin.conversion import caffe2_to_onnx
+if __name__ == '__main__':
+    if sys.argv[0].endswith('.exe'):
+        sys.argv[0] = sys.argv[0][:-4]
+    sys.exit(caffe2_to_onnx())

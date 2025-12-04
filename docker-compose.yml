@@ -1,0 +1,29 @@
+# docker-compose.yml - ИСПРАВЛЕННЫЙ
+version: '3.8'
+
+services:
+  rag-ai-clone:
+    build: .
+    container_name: rag-ai-clone
+    
+    environment:
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral:7b}
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+      - TELEGRAM_PHONE=${TELEGRAM_PHONE}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - IN_DOCKER=true  # ← ДОБАВЬТЕ!
+      - PYTHONUNBUFFERED=1
+    
+    # ВАЖНО: Монтируем локальные папки
+    volumes:
+      - ./backend/data:/app/backend/data:rw  # ← ЛОКАЛЬНАЯ папка
+      - ./backend/logs:/app/backend/logs:rw
+    
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # ← Для доступа к Ollama на хосте
+    
+    working_dir: /app/backend
+    
+    restart: unless-stopped

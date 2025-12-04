@@ -1,0 +1,81 @@
+# .gitignore
+
+# Файлы окружения
+.env
+.env.local
+.env.*.local
+
+# Данные приложения
+backend/data/*
+!backend/data/.gitkeep
+backend/data/user_messages.json
+backend/data/facts_advanced.json
+backend/data/prompt_template.json
+backend/data/dialogue_history.json
+backend/data/cleaned_messages.json
+backend/chroma_db/
+
+# Логи
+logs/*
+!logs/.gitkeep
+*.log
+bot.log
+
+# Сессии Telegram
+session/
+*.session
+*.session-journal
+
+# Питон
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Виртуальные окружения
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Системные
+.DS_Store
+Thumbs.db
+
+# Резервные копии
+backup/
+*.bak
+
+# Тестовые данные
+test_data/
+tmp/
+temp/

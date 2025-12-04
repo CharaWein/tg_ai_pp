@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  rag-ai-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: rag-ai-clone-dev
+    environment:
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral:7b}
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+      - TELEGRAM_PHONE=${TELEGRAM_PHONE}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - PYTHONUNBUFFERED=1
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./backend:/app/backend:rw
+      - ./logs:/app/logs:rw
+      - ./.env:/app/.env:ro
+    ports:
+      - "8080:8080"  # Для дебага/мониторинга
+    working_dir: /app/backend
+    command: >
+      sh -c "
+        echo '🤖 RAG AI Telegram Clone (Dev Mode)' &&
+        echo '====================================' &&
+        echo '' &&
+        echo 'Доступные команды:' &&
+        echo '  make collect    - Сбор данных' &&
+        echo '  make build-db   - Построение БД' &&
+        echo '  make analyze    - Анализ стиля' &&
+        echo '  make run-bot    - Запуск бота' &&
+        echo '  make all        - Весь пайплайн' &&
+        echo '' &&
+        tail -f /dev/null  # Ожидание команд
+      "
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
