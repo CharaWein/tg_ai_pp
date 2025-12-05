@@ -3,6 +3,16 @@
 import os
 from dotenv import load_dotenv
 from pathlib import Path
+import os
+
+# Автоматическое определение URL для Docker
+if os.environ.get('IN_DOCKER') or os.path.exists('/.dockerenv'):
+    OLLAMA_API_URL = "http://host.docker.internal:11434"
+    print("🐳 Docker: использую host.docker.internal:11434")
+else:
+    OLLAMA_API_URL = "http://localhost:11434"
+    print("🖥️  Хост: использую localhost:11434")
+
 
 # Загрузка .env первым делом!
 load_dotenv()
@@ -18,7 +28,7 @@ TELEGRAM_PHONE = os.getenv("TELEGRAM_PHONE", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 # ========== OLLAMA ==========
-OLLAMA_API_URL = "http://localhost:11434"
+# OLLAMA_API_URL уже установлен выше в зависимости от окружения
 OLLAMA_MODEL = "mistral:7b"
 
 # ========== ФАЙЛЫ ДАННЫХ ==========

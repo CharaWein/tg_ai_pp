@@ -1,17 +1,32 @@
-*.json
-data/*.json
-*.env
+# .gitignore
 
-# AI Models
-trained_models/
-user_data/
-clone_links.json
+# Файлы окружения
+.env
+.env.local
+.env.*.local
 
-# Telegram sessions
+# Данные приложения
+backend/data/*
+!backend/data/.gitkeep
+backend/data/user_messages.json
+backend/data/facts_advanced.json
+backend/data/prompt_template.json
+backend/data/dialogue_history.json
+backend/data/cleaned_messages.json
+backend/chroma_db/
+
+# Логи
+logs/*
+!logs/.gitkeep
+*.log
+bot.log
+
+# Сессии Telegram
+session/
 *.session
 *.session-journal
 
-# Python
+# Питон
 __pycache__/
 *.py[cod]
 *$py.class
@@ -34,16 +49,9 @@ wheels/
 *.egg
 MANIFEST
 
-# Директории зависимостей
-node_modules/
-.npm
-.yarn/
-.pnpm/
-
-# Virtual environments
-myenv/
-env/
+# Виртуальные окружения
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
@@ -53,19 +61,21 @@ venv.bak/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Системные
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
-# Logs
-*.log
-logs/
+# Резервные копии
+backup/
+*.bak
 
-# Cache
-.cache/
+# Тестовые данные
+test_data/
+tmp/
+temp/

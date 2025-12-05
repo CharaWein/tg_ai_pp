@@ -8,15 +8,14 @@ from typing import List, Any, Dict
 import chromadb
 from chromadb.utils import embedding_functions
 import requests
-from config import MESSAGES_FILE, CHROMA_DB_DIR, DEBUG
+from config import MESSAGES_FILE, CHROMA_DB_DIR, DEBUG, OLLAMA_API_URL, OLLAMA_MODEL
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Ollama config
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "mistral:7b"
-OLLAMA_TIMEOUT = 60
+# Ollama config - используем значения из config.py
+OLLAMA_TIMEOUT = 600  # Увеличено до 10 минут для больших промптов
+OLLAMA_MAX_RETRIES = 3  # Количество попыток при ошибках
 
 
 class OllamaFactExtractor:
@@ -24,26 +23,71 @@ class OllamaFactExtractor:
 
     @staticmethod
     def call_mistral(prompt: str, temperature: float = 0.3) -> str:
-        """Вызывает Mistral 7B локально через Ollama"""
-        try:
-            response = requests.post(
-                OLLAMA_API_URL,
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "temperature": temperature,
-                },
-                timeout=OLLAMA_TIMEOUT,
-            )
-            response.raise_for_status()
-            return response.json()["response"]
-        except requests.exceptions.ConnectionError:
-            logger.error("❌ Ollama не запущена! Запусти: ollama serve")
-            raise
-        except Exception as e:
-            logger.error(f"❌ Ошибка при вызове Mistral: {e}")
-            raise
+        """Вызывает Mistral 7B локально через Ollama с retry логикой"""
+        import time
+        
+        for attempt in range(OLLAMA_MAX_RETRIES):
+            try:
+                logger.debug(f"🔄 Попытка {attempt + 1}/{OLLAMA_MAX_RETRIES} вызова Mistral...")
+                
+                # Ограничиваем размер промпта для избежания таймаутов
+                max_prompt_length = 2000  # Ограничение длины промпта
+                current_prompt = prompt
+                if len(current_prompt) > max_prompt_length:
+                    logger.warning(f"⚠️ Промпт слишком длинный ({len(current_prompt)} символов), обрезаю до {max_prompt_length}")
+                    current_prompt = current_prompt[:max_prompt_length] + "..."
+                
+                response = requests.post(
+                    f"{OLLAMA_API_URL}/api/generate",
+                    json={
+                        "model": OLLAMA_MODEL,
+                        "prompt": current_prompt,
+                        "stream": False,
+                        "temperature": temperature,
+                    },
+                    timeout=OLLAMA_TIMEOUT,
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                if "response" not in result:
+                    raise ValueError(f"Неожиданный ответ от Ollama: {result}")
+                
+                return result["response"]
+                
+            except requests.exceptions.Timeout:
+                wait_time = (attempt + 1) * 5  # Экспоненциальная задержка
+                logger.warning(f"⏱️ Таймаут при вызове Mistral (попытка {attempt + 1}/{OLLAMA_MAX_RETRIES}). Жду {wait_time} сек...")
+                if attempt < OLLAMA_MAX_RETRIES - 1:
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error("❌ Превышен таймаут после всех попыток")
+                    raise
+                    
+            except requests.exceptions.ConnectionError:
+                logger.error("❌ Ollama не запущена! Запусти: ollama serve")
+                raise
+                
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 500:
+                    wait_time = (attempt + 1) * 3
+                    logger.warning(f"⚠️ Ошибка 500 от Ollama (попытка {attempt + 1}/{OLLAMA_MAX_RETRIES}). Жду {wait_time} сек...")
+                    if attempt < OLLAMA_MAX_RETRIES - 1:
+                        time.sleep(wait_time)
+                        continue
+                raise
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка при вызове Mistral: {e}")
+                if attempt < OLLAMA_MAX_RETRIES - 1:
+                    wait_time = (attempt + 1) * 2
+                    logger.warning(f"🔄 Повторная попытка через {wait_time} сек...")
+                    time.sleep(wait_time)
+                    continue
+                raise
+        
+        raise RuntimeError("Не удалось выполнить запрос после всех попыток")
 
     @staticmethod
     def extract_facts(messages: List[str]) -> Dict[str, Any]:
@@ -57,7 +101,7 @@ class OllamaFactExtractor:
             str(msg) for msg in messages
             if msg and len(str(msg).strip()) > 3
             and not re.match(r'^(найти|http|^\d+:\d+)', str(msg).lower())
-        ][:200]  # Берем первые 200 значимых сообщений
+        ][:100]  # Берем первые 200 значимых сообщений
 
         messages_text = "\n".join(meaningful_messages)
         if not messages_text.strip():
@@ -69,7 +113,7 @@ class OllamaFactExtractor:
         logger.info("🔍 Step 1: Извлекаю личную информацию...")
         personal_prompt = f"""Проанализируй эти сообщения и извлеки личную информацию:
 
-{messages_text[:2000]}
+{messages_text[:300]}
 
 Верни JSON (только JSON, без текста):
 {{
@@ -96,7 +140,7 @@ class OllamaFactExtractor:
         logger.info("🎮 Step 2: Извлекаю интересы и хобби...")
         hobbies_prompt = f"""Проанализируй эти сообщения и найди интересы:
 
-{messages_text[:2000]}
+{messages_text[:300]}
 
 Верни JSON (только JSON):
 {{
@@ -123,7 +167,7 @@ class OllamaFactExtractor:
         logger.info("🎯 Step 3: Извлекаю убеждения и ценности...")
         beliefs_prompt = f"""Проанализируй эти сообщения и определи убеждения человека:
 
-{messages_text[:2000]}
+{messages_text[:300]}
 
 Верни JSON (только JSON):
 {{
@@ -146,7 +190,7 @@ class OllamaFactExtractor:
         logger.info("💬 Step 4: Анализирую стиль общения...")
         style_prompt = f"""Проанализируй стиль общения в этих сообщениях:
 
-{messages_text[:1500]}
+{messages_text[:800]}
 
 Верни JSON (только JSON):
 {{
@@ -171,7 +215,7 @@ class OllamaFactExtractor:
         logger.info("💻 Step 5: Извлекаю образование и навыки...")
         skills_prompt = f"""Проанализируй эти сообщения и определи навыки:
 
-{messages_text[:2000]}
+{messages_text[:300]}
 
 Верни JSON (только JSON):
 {{
@@ -400,7 +444,7 @@ def build_vector_db():
         logger.info(f"💾 Очищенные сообщения сохранены в: {cleaned_messages_path}")
 
         # Создаем ChromaDB
-        client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
+        client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
 
         try:
             client.delete_collection(name="user_messages")

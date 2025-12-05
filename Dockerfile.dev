@@ -1,0 +1,31 @@
+# Dockerfile.dev
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Устанавливаем системные зависимости
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    vim \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Копируем зависимости
+COPY requirements.txt .
+
+# Устанавливаем Python зависимости
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Копируем код
+COPY backend/ ./backend/
+
+# Создаем необходимые папки
+RUN mkdir -p /app/backend/data /app/logs
+
+# Устанавливаем рабочую директорию
+WORKDIR /app/backend
+
+# Команда по умолчанию
+CMD ["python", "run.py"]

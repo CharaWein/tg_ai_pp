@@ -6,6 +6,11 @@ import time
 import requests
 from config import BOT_TOKEN, DEBUG
 from llm_generator_final import get_answer, clear_history
+import subprocess
+import time
+import requests
+
+
 
 # ========== ЛОГИРОВАНИЕ ==========
 logging.basicConfig(
